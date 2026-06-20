@@ -312,6 +312,44 @@
             margin-right: 0;
         }
 
+        /* 推荐区域加载动画 */
+        .recommend-loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 10px;
+            padding: 20px;
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .recommend-thinking {
+            display: inline-flex;
+            align-items: center;
+            gap: 4px;
+        }
+
+        .recommend-thinking span {
+            width: 8px;
+            height: 8px;
+            background: var(--primary-color);
+            border-radius: 50%;
+            animation: bounce 1.4s infinite ease-in-out both;
+        }
+
+        .recommend-thinking span:nth-child(1) { animation-delay: -0.32s; }
+        .recommend-thinking span:nth-child(2) { animation-delay: -0.16s; }
+        .recommend-thinking span:nth-child(3) { animation-delay: 0s; }
+
+        .recommend-loading-text {
+            color: var(--text-secondary);
+            font-size: 13px;
+        }
+
+        .dark-theme .recommend-loading-text {
+            color: var(--text-secondary);
+        }
+
         .dark-theme .recommend-tag {
             background: linear-gradient(135deg, #9a5a9f 0%, #8a3a6a 100%);
             box-shadow: 0 4px 12px rgba(154, 90, 159, 0.3);
@@ -1210,6 +1248,16 @@
                 font-size: 14px;
             }
 
+            .recommend-loading {
+                padding: 16px;
+                font-size: 14px;
+            }
+
+            .recommend-thinking span {
+                width: 10px;
+                height: 10px;
+            }
+
             .theme-toggle {
                 width: 44px;
                 height: 44px;
@@ -1398,6 +1446,12 @@
             <div class="recommend-section" id="recommendSection" style="display: none;">
                 <div class="label" id="recommendLabel">🔮 猜你想查</div>
                 <div class="tags-container" id="recommendTags"></div>
+                <div class="recommend-loading" id="recommendLoading" style="display: none;">
+                    <div class="recommend-thinking">
+                        <span></span><span></span><span></span>
+                    </div>
+                    <span class="recommend-loading-text">AI 正在思考推荐...</span>
+                </div>
             </div>
             
             <!-- 截图弹窗 -->
@@ -1524,6 +1578,32 @@
 - 只输出分析内容，不要添加额外解释
         `.trim();
 
+        /**
+         * 智能推荐提示词模板
+         */
+        const RECOMMEND_PROMPT_TEMPLATE = `
+你是一位专业的电商导购专家。用户刚刚搜索了「{category}」这个商品品类。
+
+请根据这个商品，推荐5个相关的、用户可能也会感兴趣的配件、周边或互补商品。
+
+要求：
+1. 推荐内容必须是具体的商品名称，每个不超过6个字
+2. 推荐要与「{category}」有强关联性（如配件、耗材、互补品、相关工具等）
+3. 不要推荐同类型的竞品（如搜索手机不推荐其他手机）
+4. 输出格式：每行一个推荐，只输出商品名称，不要编号、不要解释
+5. 必须输出5个推荐
+
+示例：
+如果用户搜索「手机」，推荐：
+手机壳
+充电器
+钢化膜
+充电宝
+耳机
+
+现在请为「{category}」推荐5个相关商品：
+        `.trim();
+
         // ==================== 工具函数 ====================
 
         /**
@@ -1554,6 +1634,8 @@
          * 显示加载动画
          */
         let progressInterval;
+        let targetProgress = 0;
+        let currentProgress = 0;
         const showLoading = () => {
             document.getElementById('loading').style.display = 'block';
             document.getElementById('resultSection').style.display = 'none';
@@ -1565,33 +1647,58 @@
             const progressText = document.getElementById('progressText');
             progressBar.style.width = '0%';
             progressText.textContent = '0%';
+            currentProgress = 0;
+            targetProgress = 0;
             
-            // 模拟进度动画
-            let progress = 0;
-            progressInterval = setInterval(() => {
-                // 非线性增长，越往后越慢
-                if (progress < 30) {
-                    progress += Math.random() * 5 + 2;
-                } else if (progress < 60) {
-                    progress += Math.random() * 3 + 1;
-                } else if (progress < 85) {
-                    progress += Math.random() * 2 + 0.5;
-                } else if (progress < 95) {
-                    progress += Math.random() * 0.5 + 0.1;
+            // 使用 requestAnimationFrame 实现平滑动画
+            let lastTime = 0;
+            const animate = (timestamp) => {
+                if (!lastTime) lastTime = timestamp;
+                const delta = timestamp - lastTime;
+                
+                // 根据目标进度平滑过渡
+                if (currentProgress < targetProgress) {
+                    const diff = targetProgress - currentProgress;
+                    currentProgress += diff * 0.05; // 缓动系数
                 }
                 
-                if (progress > 95) progress = 95;
+                progressBar.style.width = `${currentProgress}%`;
+                progressText.textContent = `${Math.floor(currentProgress)}%`;
                 
-                progressBar.style.width = `${progress}%`;
-                progressText.textContent = `${Math.floor(progress)}%`;
-            }, 200);
+                progressInterval = requestAnimationFrame(animate);
+            };
+            progressInterval = requestAnimationFrame(animate);
+            
+            // 动态更新目标进度，模拟AI分析过程
+            const updateTarget = () => {
+                if (targetProgress < 30) {
+                    targetProgress += Math.random() * 3 + 1;
+                } else if (targetProgress < 60) {
+                    targetProgress += Math.random() * 2 + 0.5;
+                } else if (targetProgress < 85) {
+                    targetProgress += Math.random() * 1.5 + 0.3;
+                } else if (targetProgress < 92) {
+                    targetProgress += Math.random() * 0.3 + 0.1;
+                }
+                
+                if (targetProgress > 92) targetProgress = 92;
+            };
+            
+            // 每300ms更新一次目标进度
+            const targetUpdater = setInterval(updateTarget, 300);
+            
+            // 保存清理函数
+            window._clearTargetUpdater = () => clearInterval(targetUpdater);
         };
 
         /**
          * 隐藏加载动画
          */
         const hideLoading = () => {
-            clearInterval(progressInterval);
+            cancelAnimationFrame(progressInterval);
+            if (window._clearTargetUpdater) {
+                window._clearTargetUpdater();
+            }
             
             // 快速补满到 100%
             const progressBar = document.getElementById('progressBar');
@@ -1604,6 +1711,8 @@
                 document.getElementById('loading').style.display = 'none';
                 progressBar.style.width = '0%';
                 progressText.textContent = '0%';
+                currentProgress = 0;
+                targetProgress = 0;
             }, 300);
         };
 
@@ -1845,6 +1954,46 @@
             
             const data = await response.json();
             return data.choices[0]?.message?.content || '';
+        }
+
+        /**
+         * 调用 DeepSeek API 获取智能推荐
+         * @param {string} category - 商品品类
+         * @returns {Promise<Array>} 推荐商品数组
+         */
+        async function callRecommendApi(category) {
+            const apiKey = getApiKey();
+            const prompt = RECOMMEND_PROMPT_TEMPLATE.replace('{category}', category);
+            
+            const response = await fetch(API_BASE_URL, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                    'Authorization': `Bearer ${apiKey}`
+                },
+                body: JSON.stringify({
+                    model: MODEL_NAME,
+                    messages: [
+                        {
+                            role: 'user',
+                            content: prompt
+                        }
+                    ],
+                    temperature: 0.7,
+                    max_tokens: 500
+                })
+            });
+            
+            if (!response.ok) {
+                throw new Error('推荐获取失败');
+            }
+            
+            const data = await response.json();
+            const content = data.choices[0]?.message?.content || '';
+            
+            // 解析推荐结果（每行一个）
+            const lines = content.split('\n').map(line => line.trim()).filter(line => line);
+            return lines.slice(0, 5); // 最多返回5个
         }
 
         /**
@@ -2268,19 +2417,88 @@
         const DEFAULT_RECOMMENDATIONS = ["手机壳", "充电器", "蓝牙耳机", "保温杯", "收纳箱"];
 
         /**
+         * 显示推荐区域加载动画
+         * @param {string} category - 当前商品品类
+         */
+        const showRecommendLoading = (category) => {
+            const section = document.getElementById('recommendSection');
+            const label = document.getElementById('recommendLabel');
+            const tags = document.getElementById('recommendTags');
+            const loading = document.getElementById('recommendLoading');
+            
+            label.textContent = `🔮 根据「${category}」推荐`;
+            tags.style.display = 'none';
+            loading.style.display = 'flex';
+            section.style.display = 'block';
+        };
+
+        /**
+         * 隐藏推荐区域加载动画
+         */
+        const hideRecommendLoading = () => {
+            const tags = document.getElementById('recommendTags');
+            const loading = document.getElementById('recommendLoading');
+            
+            tags.style.display = 'flex';
+            loading.style.display = 'none';
+        };
+
+        /**
          * 生成推荐
          */
-        const generateRecommendations = () => {
+        const generateRecommendations = async () => {
             const history = JSON.parse(localStorage.getItem('search_history') || '[]');
             const latest = history[0]; // 最近一次搜索
             
+            if (!latest) {
+                renderRecommendations(DEFAULT_RECOMMENDATIONS, null);
+                return;
+            }
+            
             let recommendations = [];
             
-            if (latest && RECOMMENDATIONS[latest]) {
+            // 1. 先检查映射表
+            if (RECOMMENDATIONS[latest]) {
                 recommendations = RECOMMENDATIONS[latest];
             } else {
-                // 默认推荐
-                recommendations = DEFAULT_RECOMMENDATIONS;
+                // 2. 映射表没有，尝试从缓存获取AI推荐
+                const cacheKey = `recommend_cache_${latest}`;
+                const cached = localStorage.getItem(cacheKey);
+                
+                if (cached) {
+                    try {
+                        const cacheData = JSON.parse(cached);
+                        if (Date.now() - cacheData.timestamp < CACHE_TTL) {
+                            recommendations = cacheData.items;
+                        }
+                    } catch (e) {
+                        // 缓存解析失败，继续请求AI
+                    }
+                }
+                
+                // 3. 缓存没有或过期，调用AI智能体
+                if (recommendations.length === 0) {
+                    // 显示加载动画
+                    showRecommendLoading(latest);
+                    
+                    try {
+                        const aiRecommendations = await callRecommendApi(latest);
+                        if (aiRecommendations.length > 0) {
+                            recommendations = aiRecommendations;
+                            // 缓存结果
+                            localStorage.setItem(cacheKey, JSON.stringify({
+                                items: aiRecommendations,
+                                timestamp: Date.now()
+                            }));
+                        }
+                    } catch (error) {
+                        console.warn('AI推荐获取失败，使用默认推荐:', error);
+                        recommendations = DEFAULT_RECOMMENDATIONS;
+                    } finally {
+                        // 隐藏加载动画
+                        hideRecommendLoading();
+                    }
+                }
             }
             
             // 过滤已搜索过的
@@ -2329,23 +2547,8 @@
         /**
          * 重新生成推荐（换一批）
          */
-        const refreshRecommendations = () => {
-            const history = JSON.parse(localStorage.getItem('search_history') || '[]');
-            const latest = history[0];
-            
-            let recommendations = [];
-            
-            if (latest && RECOMMENDATIONS[latest]) {
-                recommendations = RECOMMENDATIONS[latest];
-            } else {
-                recommendations = DEFAULT_RECOMMENDATIONS;
-            }
-            
-            // 过滤已搜索过的并打乱顺序
-            recommendations = recommendations.filter(r => !history.includes(r));
-            recommendations = shuffleArray([...recommendations]);
-            
-            renderRecommendations(recommendations, latest);
+        const refreshRecommendations = async () => {
+            await generateRecommendations();
         };
 
         /**
@@ -2411,7 +2614,7 @@
                 addSearchHistory(input);
                 
                 // 更新智能推荐
-                generateRecommendations();
+                await generateRecommendations();
                 
             } catch (error) {
                 hideLoading();
@@ -2562,12 +2765,12 @@
         });
 
         // 页面加载完成后初始化
-        document.addEventListener('DOMContentLoaded', function() {
+        document.addEventListener('DOMContentLoaded', async function() {
             setupHotTags();
             renderSearchHistory();
             renderFavorites();
             initTheme();
-            generateRecommendations();
+            await generateRecommendations();
             initSpeech();
             
             // 输入框焦点事件处理
