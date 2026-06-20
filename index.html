@@ -332,6 +332,15 @@
             margin-top: 20px;
         }
 
+        /* 结果区域按钮组 - 确保手机端正常显示 */
+        .result-section .copy-button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+            margin-top: 20px;
+        }
+
         /* ==================== 满意度评价 ==================== */
         .rating-section {
             text-align: center;
@@ -569,6 +578,8 @@
             color: white;
             display: none;
             box-shadow: 0 4px 15px rgba(40, 167, 69, 0.4);
+            width: 100%;
+            margin: 0;
         }
 
         .btn-copy:hover {
@@ -581,7 +592,8 @@
             color: white;
             display: none;
             box-shadow: 0 4px 15px rgba(255, 193, 7, 0.4);
-            margin-left: 10px;
+            width: 100%;
+            margin: 0;
         }
 
         .btn-favorite:hover {
@@ -1139,12 +1151,14 @@
             }
 
             .rating-btn.survey-btn {
-                padding: 12px 24px;
-                font-size: 14px;
-                min-height: 44px;
+                padding: 14px 32px;
+                font-size: 15px;
+                min-height: 50px;
                 display: inline-flex;
                 align-items: center;
                 justify-content: center;
+                width: 100%;
+                max-width: 280px;
             }
 
             .error-message {
@@ -1238,9 +1252,9 @@
             }
 
             .btn {
-                padding: 12px 20px;
-                font-size: 15px;
-                min-height: 44px;
+                padding: 14px 24px;
+                font-size: 16px;
+                min-height: 50px;
             }
 
             .result-section {
