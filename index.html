@@ -1402,7 +1402,7 @@
                 <div class="input-wrapper">
                     <span class="input-icon">🔍</span>
                     <input type="text" id="category" placeholder="请输入商品品类，如：手机、冰箱、T恤..." maxlength="100">
-                    <button class="mic-btn" id="micBtn" onclick="toggleSpeech()" title="语音输入">🎤</button>
+                    <button class="mic-btn" id="micBtn" title="语音输入">🎤</button>
                 </div>
             </div>
 
@@ -2129,11 +2129,22 @@
         let isRecording = false;
         let userInitiatedStop = false; // 用户主动停止标志
         let speechStarted = false; // 语音识别是否真正启动
+        let longPressTimer = null; // 长按计时器
+        let isMobile = false; // 是否移动端
+
+        /**
+         * 检测是否为移动设备
+         */
+        const checkIsMobile = () => {
+            return /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) || window.innerWidth <= 768;
+        };
 
         /**
          * 初始化语音识别
          */
         const initSpeech = () => {
+            isMobile = checkIsMobile();
+            
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             
             // 检查是否支持语音识别
@@ -2218,10 +2229,90 @@
                 console.log('语音识别结束, speechStarted:', speechStarted);
                 stopRecording();
             };
+            
+            // 绑定麦克风按钮事件
+            bindMicEvents();
         };
 
         /**
-         * 切换录音状态
+         * 绑定麦克风按钮事件
+         * 移动端：长按开始录音，松开停止
+         * 桌面端：点击切换录音状态
+         */
+        const bindMicEvents = () => {
+            const micBtn = document.getElementById('micBtn');
+            
+            if (isMobile) {
+                // 移动端：长按录音
+                micBtn.addEventListener('touchstart', (e) => {
+                    e.preventDefault();
+                    // 开始长按计时（300ms后开始录音）
+                    longPressTimer = setTimeout(() => {
+                        startRecording();
+                    }, 300);
+                }, { passive: false });
+                
+                micBtn.addEventListener('touchend', (e) => {
+                    e.preventDefault();
+                    // 清除长按计时器
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                    // 停止录音
+                    if (isRecording) {
+                        userInitiatedStop = true;
+                        stopRecording();
+                        if (recognition) {
+                            recognition.stop();
+                        }
+                    }
+                }, { passive: false });
+                
+                micBtn.addEventListener('touchcancel', (e) => {
+                    // 触摸被取消（如手指移出按钮区域）
+                    if (longPressTimer) {
+                        clearTimeout(longPressTimer);
+                        longPressTimer = null;
+                    }
+                    if (isRecording) {
+                        userInitiatedStop = true;
+                        stopRecording();
+                        if (recognition) {
+                            recognition.stop();
+                        }
+                    }
+                });
+                
+                // 移动端提示
+                micBtn.title = '长按语音输入';
+            } else {
+                // 桌面端：点击切换
+                micBtn.addEventListener('click', toggleSpeech);
+                micBtn.title = '点击语音输入';
+            }
+        };
+
+        /**
+         * 开始录音
+         */
+        const startRecording = () => {
+            if (!recognition || isRecording) return;
+            
+            userInitiatedStop = false;
+            speechStarted = false;
+            try {
+                recognition.start();
+                isRecording = true;
+                document.getElementById('micBtn').classList.add('recording');
+            } catch (e) {
+                console.error('启动语音识别失败:', e);
+                showError('语音服务启动失败，请重试', true);
+            }
+        };
+
+        /**
+         * 切换录音状态（桌面端使用）
          */
         const toggleSpeech = () => {
             if (!recognition) return;
@@ -2231,17 +2322,7 @@
                 userInitiatedStop = true;
                 recognition.stop();
             } else {
-                // 开始录音
-                userInitiatedStop = false;
-                speechStarted = false;
-                try {
-                    recognition.start();
-                    isRecording = true;
-                    document.getElementById('micBtn').classList.add('recording');
-                } catch (e) {
-                    console.error('启动语音识别失败:', e);
-                    showError('语音服务启动失败，请重试', true);
-                }
+                startRecording();
             }
         };
 
