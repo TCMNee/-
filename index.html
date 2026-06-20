@@ -212,6 +212,7 @@
             color: var(--text-secondary);
             border-radius: 50%;
             transition: all 0.2s ease;
+            z-index: 10;
         }
 
         .mic-btn:hover {
@@ -223,15 +224,58 @@
             color: #ffffff;
             background: linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%);
             animation: pulse 1s infinite;
+            box-shadow: 0 0 15px rgba(255, 107, 107, 0.5);
         }
 
         .mic-btn.hidden {
             display: none;
         }
 
+        .mic-btn.long-pressing {
+            background: rgba(102, 126, 234, 0.1);
+            transform: translateY(-50%) scale(1.05);
+        }
+
         @keyframes pulse {
             0%, 100% { transform: translateY(-50%) scale(1); }
             50% { transform: translateY(-50%) scale(1.15); }
+        }
+
+        /* 长按进度环 */
+        .mic-progress-ring {
+            position: absolute;
+            right: 12px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 40px;
+            height: 40px;
+            pointer-events: none;
+            display: none;
+            z-index: 5;
+        }
+
+        .mic-progress-ring.active {
+            display: block;
+        }
+
+        .mic-progress-ring svg {
+            width: 100%;
+            height: 100%;
+            transform: rotate(-90deg);
+        }
+
+        .mic-progress-ring circle {
+            fill: none;
+            stroke: rgba(102, 126, 234, 0.3);
+            stroke-width: 3;
+        }
+
+        .mic-progress-ring circle.progress {
+            stroke: var(--primary-color);
+            stroke-linecap: round;
+            stroke-dasharray: 113;
+            stroke-dashoffset: 113;
+            transition: stroke-dashoffset 0.1s linear;
         }
 
         .input-wrapper.focused .input-icon,
@@ -1270,6 +1314,11 @@
                 padding: 10px;
                 font-size: 18px;
             }
+
+            .mic-progress-ring {
+                width: 44px;
+                height: 44px;
+            }
         }
 
         /* 手机端优化 (max-width: 480px) */
@@ -1346,6 +1395,11 @@
                 font-size: 16px;
             }
 
+            .mic-progress-ring {
+                width: 40px;
+                height: 40px;
+            }
+
             .screenshot-modal {
                 padding: 10px;
             }
@@ -1402,6 +1456,12 @@
                 <div class="input-wrapper">
                     <span class="input-icon">🔍</span>
                     <input type="text" id="category" placeholder="请输入商品品类，如：手机、冰箱、T恤..." maxlength="100">
+                    <div class="mic-progress-ring" id="micProgressRing">
+                        <svg viewBox="0 0 40 40">
+                            <circle cx="20" cy="20" r="18"></circle>
+                            <circle cx="20" cy="20" r="18" class="progress"></circle>
+                        </svg>
+                    </div>
                     <button class="mic-btn" id="micBtn" title="语音输入">🎤</button>
                 </div>
             </div>
@@ -2127,10 +2187,44 @@
         
         let recognition = null;
         let isRecording = false;
-        let userInitiatedStop = false; // 用户主动停止标志
-        let speechStarted = false; // 语音识别是否真正启动
-        let longPressTimer = null; // 长按计时器
-        let isMobile = false; // 是否移动端
+        let userInitiatedStop = false;
+        let speechStarted = false;
+        let longPressTimer = null;
+        let isMobile = false;
+        let longPressStartTime = 0;
+        let longPressProgressTimer = null;
+        let touchStartX = 0;
+        let touchStartY = 0;
+        const LONG_PRESS_DURATION = 400;
+
+        /**
+         * 检测浏览器类型
+         */
+        const getBrowserInfo = () => {
+            const ua = navigator.userAgent.toLowerCase();
+            const isWeChat = ua.includes('micromessenger');
+            const isSafari = ua.includes('safari') && !ua.includes('chrome');
+            const isChrome = ua.includes('chrome');
+            const isEdge = ua.includes('edg');
+            const isFirefox = ua.includes('firefox');
+            const isQQ = ua.includes('qq/');
+            const isUC = ua.includes('ucbrowser') || ua.includes('ucweb');
+            const isAndroid = ua.includes('android');
+            const isIOS = ua.includes('iphone') || ua.includes('ipad');
+            
+            return {
+                isWeChat,
+                isSafari,
+                isChrome,
+                isEdge,
+                isFirefox,
+                isQQ,
+                isUC,
+                isAndroid,
+                isIOS,
+                name: isWeChat ? '微信浏览器' : isSafari ? 'Safari' : isChrome ? 'Chrome' : isEdge ? 'Edge' : isFirefox ? 'Firefox' : isQQ ? 'QQ浏览器' : isUC ? 'UC浏览器' : '其他浏览器'
+            };
+        };
 
         /**
          * 检测是否为移动设备
@@ -2140,26 +2234,101 @@
         };
 
         /**
+         * 获取浏览器兼容性提示
+         */
+        const getBrowserCompatibilityTip = () => {
+            const browser = getBrowserInfo();
+            
+            if (browser.isWeChat) {
+                return { supported: true, tip: '微信浏览器建议在微信小程序或使用系统浏览器打开以获得更好的语音体验' };
+            }
+            if (browser.isSafari && browser.isIOS) {
+                return { supported: true, tip: 'Safari 需要 iOS 14.5+ 版本支持语音识别' };
+            }
+            if (browser.isChrome && browser.isAndroid) {
+                return { supported: true, tip: '' };
+            }
+            if (browser.isUC) {
+                return { supported: true, tip: 'UC浏览器建议切换到极速模式以支持语音识别' };
+            }
+            if (browser.isFirefox) {
+                return { supported: false, tip: 'Firefox 移动端暂不支持语音识别，请使用 Chrome 或 Safari' };
+            }
+            return { supported: true, tip: '' };
+        };
+
+        /**
+         * 更新长按进度环
+         */
+        const updateLongPressProgress = () => {
+            const progressRing = document.getElementById('micProgressRing');
+            const progressCircle = progressRing.querySelector('.progress');
+            const elapsed = Date.now() - longPressStartTime;
+            const progress = Math.min(elapsed / LONG_PRESS_DURATION, 1);
+            const dashOffset = 113 * (1 - progress);
+            
+            progressCircle.style.strokeDashoffset = dashOffset;
+            
+            if (progress < 1) {
+                longPressProgressTimer = requestAnimationFrame(updateLongPressProgress);
+            }
+        };
+
+        /**
+         * 显示长按进度环
+         */
+        const showLongPressProgress = () => {
+            const progressRing = document.getElementById('micProgressRing');
+            progressRing.classList.add('active');
+            longPressStartTime = Date.now();
+            longPressProgressTimer = requestAnimationFrame(updateLongPressProgress);
+        };
+
+        /**
+         * 隐藏长按进度环
+         */
+        const hideLongPressProgress = () => {
+            const progressRing = document.getElementById('micProgressRing');
+            progressRing.classList.remove('active');
+            const progressCircle = progressRing.querySelector('.progress');
+            progressCircle.style.strokeDashoffset = 113;
+            if (longPressProgressTimer) {
+                cancelAnimationFrame(longPressProgressTimer);
+                longPressProgressTimer = null;
+            }
+        };
+
+        /**
          * 初始化语音识别
          */
         const initSpeech = () => {
             isMobile = checkIsMobile();
+            const browser = getBrowserInfo();
+            const compatibility = getBrowserCompatibilityTip();
             
             const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
             
             // 检查是否支持语音识别
             if (!SpeechRecognition) {
-                // 不支持语音识别，隐藏麦克风按钮
                 document.getElementById('micBtn').classList.add('hidden');
-                console.warn('浏览器不支持语音识别');
+                console.warn(`浏览器 ${browser.name} 不支持语音识别`);
                 return;
             }
             
-            // 检查 HTTPS 环境（部分浏览器要求）
+            // 检查 HTTPS 环境
             const isHttps = location.protocol === 'https:' || location.hostname === 'localhost' || location.hostname === '127.0.0.1';
             if (!isHttps) {
-                // 非 HTTPS 环境，可能不支持，但仍保留按钮尝试
                 console.warn('非 HTTPS 环境，语音识别可能受限');
+                if (browser.isWeChat) {
+                    showError('微信浏览器中语音识别需要在 HTTPS 环境下使用', false);
+                }
+            }
+            
+            // 浏览器特定的兼容性处理
+            if (!compatibility.supported) {
+                document.getElementById('micBtn').classList.add('hidden');
+                console.warn(`${browser.name} 不支持语音识别`);
+                return;
             }
             
             recognition = new SpeechRecognition();
@@ -2167,7 +2336,16 @@
             recognition.continuous = false;
             recognition.interimResults = true;
             
-            // 语音识别成功启动
+            // 微信浏览器特殊处理
+            if (browser.isWeChat) {
+                recognition.continuous = true;
+            }
+            
+            // iOS Safari 特殊处理
+            if (browser.isSafari && browser.isIOS) {
+                recognition.maxAlternatives = 1;
+            }
+            
             recognition.onstart = () => {
                 speechStarted = true;
                 console.log('语音识别已启动');
@@ -2177,7 +2355,6 @@
                 const transcript = Array.from(event.results)
                     .map(r => r[0].transcript)
                     .join('');
-                // 只保留中文、英文、数字和空格
                 const cleanText = transcript.replace(/[^\u4e00-\u9fa5a-zA-Z0-9\s]/g, '').trim();
                 document.getElementById('category').value = cleanText;
             };
@@ -2186,38 +2363,54 @@
                 console.error('语音识别错误:', event.error, 'speechStarted:', speechStarted);
                 stopRecording();
                 
-                // 如果是 aborted 且语音识别未真正启动，静默处理（浏览器自动中止）
                 if (event.error === 'aborted' && !speechStarted) {
-                    console.warn('语音识别被浏览器自动中止，可能是环境限制');
-                    showError('语音服务启动失败，请使用 HTTPS 环境或尝试其他浏览器', true);
+                    console.warn('语音识别被浏览器自动中止');
+                    let errorMsg = '语音服务启动失败';
+                    
+                    if (!isHttps) {
+                        errorMsg = '语音识别需要 HTTPS 环境，请在安全连接下使用';
+                    } else if (browser.isWeChat) {
+                        errorMsg = '微信浏览器语音支持有限，请尝试使用 Chrome 或 Safari';
+                    } else if (browser.isSafari && browser.isIOS) {
+                        errorMsg = '请确保 iOS 版本在 14.5+ 以上，并允许麦克风权限';
+                    } else {
+                        errorMsg = '语音服务启动失败，请尝试其他浏览器';
+                    }
+                    showError(errorMsg, true);
                     return;
                 }
                 
-                // 如果是用户主动停止导致的 aborted，不显示错误
                 if (event.error === 'aborted' && userInitiatedStop) {
                     return;
                 }
                 
-                // 根据错误类型显示不同提示
                 let errorMsg = '';
                 switch (event.error) {
                     case 'not-allowed':
-                        errorMsg = '请允许麦克风权限后重试';
+                        errorMsg = browser.isWeChat 
+                            ? '请在微信设置中允许麦克风权限，或使用系统浏览器' 
+                            : '请允许麦克风权限后重试';
                         break;
                     case 'no-speech':
                         errorMsg = '未检测到语音，请靠近麦克风说话';
                         break;
                     case 'audio-capture':
-                        errorMsg = '麦克风无法使用，请检查设备';
+                        errorMsg = browser.isIOS 
+                            ? '请在系统设置中允许麦克风访问权限' 
+                            : '麦克风无法使用，请检查设备';
                         break;
                     case 'network':
-                        errorMsg = '网络异常，请检查网络连接';
+                        errorMsg = '网络异常，请检查网络连接后重试';
                         break;
                     case 'aborted':
                         errorMsg = '语音识别被中断，请重试';
                         break;
                     case 'service-not-allowed':
-                        errorMsg = '浏览器不支持语音服务';
+                        errorMsg = `${browser.name} 当前不支持语音服务`;
+                        break;
+                    case 'bad-grammar':
+                    case 'language-not-supported':
+                        errorMsg = '当前语言不支持，请使用中文普通话';
                         break;
                     default:
                         errorMsg = '语音识别失败，请重试';
@@ -2227,39 +2420,61 @@
             
             recognition.onend = () => {
                 console.log('语音识别结束, speechStarted:', speechStarted);
-                stopRecording();
+                if (!userInitiatedStop && isRecording) {
+                    stopRecording();
+                }
             };
             
-            // 绑定麦克风按钮事件
             bindMicEvents();
         };
 
         /**
          * 绑定麦克风按钮事件
-         * 移动端：长按开始录音，松开停止
-         * 桌面端：点击切换录音状态
          */
         const bindMicEvents = () => {
             const micBtn = document.getElementById('micBtn');
             
             if (isMobile) {
-                // 移动端：长按录音
                 micBtn.addEventListener('touchstart', (e) => {
                     e.preventDefault();
-                    // 开始长按计时（300ms后开始录音）
+                    const touch = e.touches[0];
+                    touchStartX = touch.clientX;
+                    touchStartY = touch.clientY;
+                    
+                    micBtn.classList.add('long-pressing');
+                    showLongPressProgress();
+                    
                     longPressTimer = setTimeout(() => {
                         startRecording();
-                    }, 300);
+                    }, LONG_PRESS_DURATION);
+                }, { passive: false });
+                
+                micBtn.addEventListener('touchmove', (e) => {
+                    e.preventDefault();
+                    const touch = e.touches[0];
+                    const deltaX = Math.abs(touch.clientX - touchStartX);
+                    const deltaY = Math.abs(touch.clientY - touchStartY);
+                    
+                    if (deltaX > 30 || deltaY > 30) {
+                        if (longPressTimer) {
+                            clearTimeout(longPressTimer);
+                            longPressTimer = null;
+                        }
+                        hideLongPressProgress();
+                        micBtn.classList.remove('long-pressing');
+                    }
                 }, { passive: false });
                 
                 micBtn.addEventListener('touchend', (e) => {
                     e.preventDefault();
-                    // 清除长按计时器
+                    hideLongPressProgress();
+                    micBtn.classList.remove('long-pressing');
+                    
                     if (longPressTimer) {
                         clearTimeout(longPressTimer);
                         longPressTimer = null;
                     }
-                    // 停止录音
+                    
                     if (isRecording) {
                         userInitiatedStop = true;
                         stopRecording();
@@ -2270,7 +2485,9 @@
                 }, { passive: false });
                 
                 micBtn.addEventListener('touchcancel', (e) => {
-                    // 触摸被取消（如手指移出按钮区域）
+                    hideLongPressProgress();
+                    micBtn.classList.remove('long-pressing');
+                    
                     if (longPressTimer) {
                         clearTimeout(longPressTimer);
                         longPressTimer = null;
@@ -2284,10 +2501,8 @@
                     }
                 });
                 
-                // 移动端提示
                 micBtn.title = '长按语音输入';
             } else {
-                // 桌面端：点击切换
                 micBtn.addEventListener('click', toggleSpeech);
                 micBtn.title = '点击语音输入';
             }
