@@ -2127,6 +2127,8 @@
         
         let recognition = null;
         let isRecording = false;
+        let userInitiatedStop = false; // 用户主动停止标志
+        let speechStarted = false; // 语音识别是否真正启动
 
         /**
          * 初始化语音识别
@@ -2154,6 +2156,12 @@
             recognition.continuous = false;
             recognition.interimResults = true;
             
+            // 语音识别成功启动
+            recognition.onstart = () => {
+                speechStarted = true;
+                console.log('语音识别已启动');
+            };
+            
             recognition.onresult = (event) => {
                 const transcript = Array.from(event.results)
                     .map(r => r[0].transcript)
@@ -2164,8 +2172,20 @@
             };
             
             recognition.onerror = (event) => {
-                console.error('语音识别错误:', event.error);
+                console.error('语音识别错误:', event.error, 'speechStarted:', speechStarted);
                 stopRecording();
+                
+                // 如果是 aborted 且语音识别未真正启动，静默处理（浏览器自动中止）
+                if (event.error === 'aborted' && !speechStarted) {
+                    console.warn('语音识别被浏览器自动中止，可能是环境限制');
+                    showError('语音服务启动失败，请使用 HTTPS 环境或尝试其他浏览器', true);
+                    return;
+                }
+                
+                // 如果是用户主动停止导致的 aborted，不显示错误
+                if (event.error === 'aborted' && userInitiatedStop) {
+                    return;
+                }
                 
                 // 根据错误类型显示不同提示
                 let errorMsg = '';
@@ -2183,7 +2203,7 @@
                         errorMsg = '网络异常，请检查网络连接';
                         break;
                     case 'aborted':
-                        errorMsg = '语音输入已取消';
+                        errorMsg = '语音识别被中断，请重试';
                         break;
                     case 'service-not-allowed':
                         errorMsg = '浏览器不支持语音服务';
@@ -2195,6 +2215,7 @@
             };
             
             recognition.onend = () => {
+                console.log('语音识别结束, speechStarted:', speechStarted);
                 stopRecording();
             };
         };
@@ -2206,11 +2227,21 @@
             if (!recognition) return;
             
             if (isRecording) {
+                // 用户主动停止
+                userInitiatedStop = true;
                 recognition.stop();
             } else {
-                recognition.start();
-                isRecording = true;
-                document.getElementById('micBtn').classList.add('recording');
+                // 开始录音
+                userInitiatedStop = false;
+                speechStarted = false;
+                try {
+                    recognition.start();
+                    isRecording = true;
+                    document.getElementById('micBtn').classList.add('recording');
+                } catch (e) {
+                    console.error('启动语音识别失败:', e);
+                    showError('语音服务启动失败，请重试', true);
+                }
             }
         };
 
@@ -2219,6 +2250,7 @@
          */
         const stopRecording = () => {
             isRecording = false;
+            speechStarted = false;
             const micBtn = document.getElementById('micBtn');
             micBtn.classList.remove('recording');
         };
